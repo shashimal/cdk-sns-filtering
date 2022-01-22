@@ -10,28 +10,24 @@ import {Effect, Policy, PolicyStatement} from "aws-cdk-lib/aws-iam";
 
 export class CdkSnsFilteringStack extends Stack {
     private readonly appName: string;
-    private readonly allCustomersQueue: Queue;
-    private readonly goldCustomersQueue: Queue;
-    private readonly platinumCustomersQueue: Queue;
 
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
         this.appName = this.node.tryGetContext('appName')
 
         //Creating the All Customers, Gold Customers and Platinum Customers queues
-        this.allCustomersQueue = this.createQueue('AllCustomers');
-        this.goldCustomersQueue = this.createQueue('GoldCustomers');
-        this.platinumCustomersQueue = this.createQueue('PlatinumCustomers');
+        const allCustomersQueue = this.createQueue('AllCustomers');
+        const goldCustomersQueue = this.createQueue('GoldCustomers');
+        const platinumCustomersQueue = this.createQueue('PlatinumCustomers');
 
         //Creating the SNS topic for customer requests
         const snsTopic = this.createCustomerSNSTopic();
 
         //AllCustomers queue subscribes to SNS topic
-        snsTopic.addSubscription(new SqsSubscription(this.allCustomersQueue));
+        snsTopic.addSubscription(new SqsSubscription(allCustomersQueue));
 
-        //GoldCustomers queue subscribes to SNS topic
-        //GoldCustomers receives platinum customer's requests
-        snsTopic.addSubscription(new SqsSubscription(this.goldCustomersQueue, {
+        //GoldCustomers queue subscribes to SNS topic and it only receives platinum customer's requests
+        snsTopic.addSubscription(new SqsSubscription(goldCustomersQueue, {
             filterPolicy: {
                 type: SubscriptionFilter.stringFilter({
                     allowlist: ['Gold']
@@ -39,9 +35,8 @@ export class CdkSnsFilteringStack extends Stack {
             }
         }));
 
-        //PlatinumCustomers queue subscribes to SNS topic
-        //PlatinumCustomers receives platinum customer's requests
-        snsTopic.addSubscription(new SqsSubscription(this.platinumCustomersQueue, {
+        //PlatinumCustomers queue subscribes to SNS topic and it only receives platinum customer's requests
+        snsTopic.addSubscription(new SqsSubscription(platinumCustomersQueue, {
             filterPolicy: {
                 type: SubscriptionFilter.stringFilter({
                     allowlist: ['Platinum']
@@ -49,13 +44,13 @@ export class CdkSnsFilteringStack extends Stack {
             }
         }));
 
+        this.createAllCustomersLambdaFunction(allCustomersQueue);
+        this.createGoldCustomersLambdaFunction(goldCustomersQueue);
+        this.createPlatinumCustomersLambdaFunction(platinumCustomersQueue);
+
         new CfnOutput(this, `${this.appName}-CustomersTopic-Arn`, {
             value: snsTopic.topicArn
         });
-
-        this.createAllCustomersLambdaFunction();
-        this.createGoldCustomersLambdaFunction();
-        this.createPlatinumCustomersLambdaFunction();
     }
 
     private createCustomerSNSTopic = (): Topic => {
@@ -69,52 +64,52 @@ export class CdkSnsFilteringStack extends Stack {
         return new Queue(this, `${this.appName}-${queueName}-Queue`)
     }
 
-    private createAllCustomersLambdaFunction = () => {
+    private createAllCustomersLambdaFunction = (sourceQueue: Queue) => {
         const allCustomersLambdaFunction = new Function(this, `${this.appName}-All-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/all-customers')),
             handler: "all-customers.handler",
             runtime: Runtime.NODEJS_14_X
         });
 
-        allCustomersLambdaFunction.addEventSource(new SqsEventSource(this.allCustomersQueue, {
+        allCustomersLambdaFunction.addEventSource(new SqsEventSource(sourceQueue, {
             batchSize: 10
         }));
 
-        allCustomersLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-AllCustomers-Queue`,{
-            statements: [this.getLambdaSqsPermissionPolicy(this.allCustomersQueue.queueArn)]
+        allCustomersLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-AllCustomers-Queue`, {
+            statements: [this.getLambdaSqsPermissionPolicy(sourceQueue.queueArn)]
         }));
 
     }
 
-    private createGoldCustomersLambdaFunction = () => {
+    private createGoldCustomersLambdaFunction = (sourceQueue: Queue) => {
         const goldCustomersLambdaFunction = new Function(this, `${this.appName}-Gold-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/gold-customers')),
             handler: "gold-customers.handler",
             runtime: Runtime.NODEJS_14_X
         });
 
-        goldCustomersLambdaFunction.addEventSource(new SqsEventSource(this.goldCustomersQueue, {
+        goldCustomersLambdaFunction.addEventSource(new SqsEventSource(sourceQueue, {
             batchSize: 10
         }));
 
-        goldCustomersLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-GoldCustomers-Queue`,{
-            statements: [this.getLambdaSqsPermissionPolicy(this.goldCustomersQueue.queueArn)]
+        goldCustomersLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-GoldCustomers-Queue`, {
+            statements: [this.getLambdaSqsPermissionPolicy(sourceQueue.queueArn)]
         }));
     }
 
-    private createPlatinumCustomersLambdaFunction = () => {
+    private createPlatinumCustomersLambdaFunction = (sourceQueue: Queue) => {
         const platinumCustomerLambdaFunction = new Function(this, `${this.appName}-Platinum-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/platinum-customers')),
             handler: "platinum-customers.handler",
             runtime: Runtime.NODEJS_14_X
         });
 
-        platinumCustomerLambdaFunction.addEventSource(new SqsEventSource(this.platinumCustomersQueue, {
+        platinumCustomerLambdaFunction.addEventSource(new SqsEventSource(sourceQueue, {
             batchSize: 10
         }));
 
-        platinumCustomerLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-PlatinumCustomers-Queue`,{
-            statements: [this.getLambdaSqsPermissionPolicy(this.platinumCustomersQueue.queueArn)]
+        platinumCustomerLambdaFunction.role?.attachInlinePolicy(new Policy(this, `${this.appName}-SQS-Permission-For-PlatinumCustomers-Queue`, {
+            statements: [this.getLambdaSqsPermissionPolicy(sourceQueue.queueArn)]
         }));
     }
 
