@@ -21,7 +21,7 @@ export class CdkSnsFilteringStack extends Stack {
         const platinumCustomersQueue = this.createQueue('PlatinumCustomers');
 
         //Creating the SNS topic for customer requests
-        const snsTopic = this.createCustomerSNSTopic();
+        const snsTopic = this.createCustomerRequestsSNSTopic();
 
         //AllCustomers queue subscribes to SNS topic
         snsTopic.addSubscription(new SqsSubscription(allCustomersQueue));
@@ -29,7 +29,7 @@ export class CdkSnsFilteringStack extends Stack {
         //GoldCustomers queue subscribes to SNS topic and it only receives platinum customer's requests
         snsTopic.addSubscription(new SqsSubscription(goldCustomersQueue, {
             filterPolicy: {
-                type: SubscriptionFilter.stringFilter({
+                customer_type: SubscriptionFilter.stringFilter({
                     allowlist: ['Gold']
                 }),
             }
@@ -38,32 +38,41 @@ export class CdkSnsFilteringStack extends Stack {
         //PlatinumCustomers queue subscribes to SNS topic and it only receives platinum customer's requests
         snsTopic.addSubscription(new SqsSubscription(platinumCustomersQueue, {
             filterPolicy: {
-                type: SubscriptionFilter.stringFilter({
+                customer_type: SubscriptionFilter.stringFilter({
                     allowlist: ['Platinum']
                 }),
             }
         }));
 
-        this.createAllCustomersLambdaFunction(allCustomersQueue);
-        this.createGoldCustomersLambdaFunction(goldCustomersQueue);
-        this.createPlatinumCustomersLambdaFunction(platinumCustomersQueue);
+        //this.createAllCustomersLambdaFunction(allCustomersQueue);
+        //this.createGoldCustomersLambdaFunction(goldCustomersQueue);
+        //this.createPlatinumCustomersLambdaFunction(platinumCustomersQueue);
 
         new CfnOutput(this, `${this.appName}-CustomersTopic-Arn`, {
             value: snsTopic.topicArn
         });
     }
 
-    private createCustomerSNSTopic = (): Topic => {
+    /*
+       Creating a SNS topic
+    */
+    private createCustomerRequestsSNSTopic = (): Topic => {
         return new Topic(this, `${this.appName}-CustomerRequestTopic`, {
             topicName: 'CustomerRequests',
             displayName: 'Customer Requests',
         });
     }
 
+    /*
+     Creating a SQS queue
+  */
     private createQueue = (queueName: string): Queue => {
         return new Queue(this, `${this.appName}-${queueName}-Queue`)
     }
 
+    /*
+        Lambda function for processing allCustomersQueue messages
+     */
     private createAllCustomersLambdaFunction = (sourceQueue: Queue) => {
         const allCustomersLambdaFunction = new Function(this, `${this.appName}-All-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/all-customers')),
@@ -81,6 +90,9 @@ export class CdkSnsFilteringStack extends Stack {
 
     }
 
+    /*
+        Lambda function for processing goldCustomersQueue messages
+     */
     private createGoldCustomersLambdaFunction = (sourceQueue: Queue) => {
         const goldCustomersLambdaFunction = new Function(this, `${this.appName}-Gold-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/gold-customers')),
@@ -97,6 +109,9 @@ export class CdkSnsFilteringStack extends Stack {
         }));
     }
 
+    /*
+        Lambda function for processing platinumCustomersQueue messages
+     */
     private createPlatinumCustomersLambdaFunction = (sourceQueue: Queue) => {
         const platinumCustomerLambdaFunction = new Function(this, `${this.appName}-Platinum-Customers-Lambda`, {
             code: Code.fromAsset(path.join(__dirname, '../lambda/platinum-customers')),
@@ -113,6 +128,9 @@ export class CdkSnsFilteringStack extends Stack {
         }));
     }
 
+    /*
+       Lambda permission policy for SQS
+     */
     private getLambdaSqsPermissionPolicy = (queueArn: string): PolicyStatement => {
         return new PolicyStatement({
             effect: Effect.ALLOW,
